@@ -34,7 +34,6 @@ namespace AzureDiscovery.Api.Controllers
             try
             {
                 var isValid = await _authService.ValidateCredentialsAsync();
-                
                 if (isValid)
                 {
                     return Ok(new 
