@@ -15,6 +15,8 @@ namespace AzureDiscovery.Infrastructure.Services
         private readonly ILogger<ResourceGraphService> _logger;
         private readonly IAzureAuthenticationService _authService;
         private readonly AzureDiscoveryOptions _options;
+        private readonly Dictionary<string, JsonElement> _providerCache = new();
+
 
         public ResourceGraphService(
             HttpClient httpClient,
@@ -81,7 +83,35 @@ namespace AzureDiscovery.Infrastructure.Services
 
                     var responseContent = await response.Content.ReadAsStringAsync();
                     var resources = ParseResourceGraphResponse(responseContent);
-                    
+                    foreach (var resource in resources)
+                    {
+                        try
+                        {
+                            if (string.IsNullOrWhiteSpace(resource.Type))
+                                continue;
+
+                            var typeParts = resource.Type.Split('/', 2);
+                            if (typeParts.Length != 2)
+                                continue;
+
+                            var providerNamespace = typeParts[0];
+                            var resourceType = typeParts[1];
+
+                            var apiVersion = await GetApiVersion(
+                                subscriptionId,
+                                providerNamespace,
+                                resourceType,
+                                resource.Location,
+                                token);
+
+                            resource.ApiVersion = apiVersion;
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Failed to assign API version to resource: {ResourceId}", resource.Id);
+                        }
+                    }
+
                     allResources.AddRange(resources);
                     
                     _logger.LogInformation("Retrieved {Count} resources (total: {Total})", 
@@ -103,6 +133,80 @@ namespace AzureDiscovery.Infrastructure.Services
             } while (true);
 
             return allResources;
+        }
+        private async Task<string?> GetApiVersion(
+            string subscriptionId,
+            string providerNamespace,
+            string resourceType,
+            string location,
+            string token)
+        {
+            try
+            {
+                if (!_providerCache.TryGetValue(providerNamespace, out JsonElement providerData))
+                {
+                    var url = $"https://management.azure.com/subscriptions/{subscriptionId}/providers/{providerNamespace}?api-version=2021-04-01";
+
+                    _httpClient.DefaultRequestHeaders.Clear();
+                    _httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {token}");
+
+                    var response = await _httpClient.GetAsync(url);
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        _logger.LogWarning("Failed to get provider metadata for {Provider}: {StatusCode}", providerNamespace, response.StatusCode);
+                        return null;
+                    }
+
+                    var json = await response.Content.ReadAsStringAsync();
+                    using var doc = JsonDocument.Parse(json);
+                    providerData = doc.RootElement.Clone();
+                    _providerCache[providerNamespace] = providerData;
+                }
+
+                if (providerData.TryGetProperty("resourceTypes", out var resourceTypesElement))
+                {
+                    foreach (var rt in resourceTypesElement.EnumerateArray())
+                    {
+                        var typeName = rt.GetProperty("resourceType").GetString();
+                        if (!typeName.Equals(resourceType, StringComparison.OrdinalIgnoreCase))
+                            continue;
+
+                        // Region check
+                        var supportedLocations = rt.TryGetProperty("locations", out var locElement)
+                            ? locElement.EnumerateArray().Select(l => NormalizeLocation(l.GetString())).ToHashSet()
+                            : new HashSet<string>();
+
+                        var normalizedRequestedLocation = NormalizeLocation(location);
+                        bool isSupportedInRegion = supportedLocations.Contains(normalizedRequestedLocation);
+
+                        if (!isSupportedInRegion)
+                        {
+                            _logger.LogWarning("Resource type {Provider}/{Type} is not supported in region {Location}", providerNamespace, resourceType, location);
+                            return null;
+                        }
+
+                        var versions = rt.GetProperty("apiVersions")
+                                         .EnumerateArray()
+                                         .Select(x => x.GetString())
+                                         .Where(x => !string.IsNullOrWhiteSpace(x))
+                                         .ToList();
+
+                        var stableVersion = versions.FirstOrDefault(v => !v.Contains("preview", StringComparison.OrdinalIgnoreCase));
+                        return stableVersion ?? versions.FirstOrDefault();
+                    }
+                }
+
+                return null;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error retrieving API version for {Provider}/{Type} in region {Location}", providerNamespace, resourceType, location);
+                return null;
+            }
+        }
+        private string NormalizeLocation(string? location)
+        {
+            return location?.Replace(" ", "").ToLowerInvariant() ?? string.Empty;
         }
 
         private string BuildResourceQuery(
@@ -185,6 +289,7 @@ namespace AzureDiscovery.Infrastructure.Services
                                       ? JsonSerializer.Deserialize<Plan>(planProp.GetRawText()): null,
                                 Properties = GetObjectProperty(item, "properties"),
                                 Tags = GetDictionaryProperty(item, "tags")
+                                //hear also have to add API version if needed
                             };
 
                             resources.Add(resource);
