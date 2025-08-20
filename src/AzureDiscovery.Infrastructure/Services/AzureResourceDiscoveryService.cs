@@ -209,7 +209,8 @@ namespace AzureDiscovery.Infrastructure.Services
                         Kind = resource.Kind ?? string.Empty,
                         Properties = JsonDocument.Parse(JsonSerializer.Serialize(resource.Properties)),
                         Tags = JsonDocument.Parse(JsonSerializer.Serialize(resource.Tags ?? new Dictionary<string, string>())),
-                        Status = ResourceStatus.Discovered
+                        Status = ResourceStatus.Discovered,
+                        ApiVersion = resource.ApiVersion
                     };
 
                     azureResources.Add(azureResource);
@@ -226,11 +227,12 @@ namespace AzureDiscovery.Infrastructure.Services
                 _dbContext.AzureResources.AddRange(azureResources);
                 await _dbContext.SaveChangesAsync();
 
+                // comment this because No background service reading from the queue
                 // Queue resources for detailed analysis
-                foreach (var resource in azureResources)
-                {
-                    await QueueResourceForAnalysisAsync(session.Id, resource.Id);
-                }
+                //foreach (var resource in azureResources)
+                //{
+                //    await QueueResourceForAnalysisAsync(session.Id, resource.Id);
+                //}
             }
         }
 

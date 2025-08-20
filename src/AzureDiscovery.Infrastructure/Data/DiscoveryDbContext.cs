@@ -51,6 +51,8 @@ namespace AzureDiscovery.Infrastructure.Data
                     .HasConversion(
                         v => v.RootElement.GetRawText(),
                         v => JsonDocument.Parse(v, new JsonDocumentOptions()));
+                entity.Property(e => e.ApiVersion)
+                    .HasColumnName("ApiVersion");
 
             });
 

@@ -18,6 +18,7 @@ namespace AzureDiscovery.Core.Models
         public JsonDocument? Plan { get; set; } = JsonDocument.Parse("{}");
         public JsonDocument Properties { get; set; } = JsonDocument.Parse("{}");
         public JsonDocument Tags { get; set; } = JsonDocument.Parse("{}");
+        public string ApiVersion { get; set; } = string.Empty;
         public DateTime DiscoveredAt { get; set; } = DateTime.UtcNow;
         public ResourceStatus Status { get; set; } = ResourceStatus.Discovered;
         public string? ParentResourceId { get; set; }

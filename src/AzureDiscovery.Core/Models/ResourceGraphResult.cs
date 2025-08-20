@@ -21,7 +21,7 @@ namespace AzureDiscovery.Core.Models
         public Sku? Sku { get; set; }
         public Identity? Identity { get; set; }
         public Plan? Plan { get; set; }
-
+        public string? ApiVersion { get; set; }
         public object? Properties { get; set; }
         public Dictionary<string, string>? Tags { get; set; }
     }

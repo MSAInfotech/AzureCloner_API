@@ -52,7 +52,7 @@ namespace AzureDiscovery.Infrastructure.Services
                         ["metadata"] = new { description = $"Name for {resource.Type}" }
                     };
 
-                    if (resource.Type == "Microsoft.Storage/storageAccounts")
+                    if (resource.Type == "microsoft.storage/storageaccounts")
                     {
                         var storageAccountName = GetStorageAccountName(resource);
                         parameterDefinition["defaultValue"] = storageAccountName;
@@ -81,7 +81,7 @@ namespace AzureDiscovery.Infrastructure.Services
             }
 
             // Add SQL Server admin password parameter if needed
-            var hasSqlServer = resources.Any(r => r.Type == "Microsoft.Sql/servers");
+            var hasSqlServer = resources.Any(r => r.Type == "microsoft.sql/servers");
             if (hasSqlServer)
             {
                 parameters["sqlAdminPassword"] = new Dictionary<string, object>
@@ -93,9 +93,9 @@ namespace AzureDiscovery.Infrastructure.Services
 
             // Add default App Service Plan parameter if any Web App has no linked plan
             var webAppsWithoutPlan = resources
-                .Where(r => r.Type.Equals("Microsoft.Web/sites", StringComparison.OrdinalIgnoreCase))
+                .Where(r => r.Type.Equals("microsoft.web/sites", StringComparison.OrdinalIgnoreCase))
                 .Where(webApp => !resources.Any(p =>
-                    p.Type.Equals("Microsoft.Web/serverfarms", StringComparison.OrdinalIgnoreCase) &&
+                    p.Type.Equals("microsoft.web/serverfarms", StringComparison.OrdinalIgnoreCase) &&
                     webApp.Dependencies.Any(d => d.TargetResourceId == p.Id)))
                 .ToList();
 
@@ -150,55 +150,143 @@ namespace AzureDiscovery.Infrastructure.Services
         {
             return resource.Type switch
             {
-                "Microsoft.Storage/storageAccounts" => GenerateStorageAccountResource(resource, allResources),
-                "Microsoft.Network/virtualNetworks" => GenerateVirtualNetworkResource(resource, allResources),
-                "Microsoft.Network/networkSecurityGroups" => GenerateNetworkSecurityGroupResource(resource, allResources),
-                "Microsoft.Network/publicIPAddresses" => GeneratePublicIPResource(resource, allResources),
-                "Microsoft.Network/networkInterfaces" => GenerateNetworkInterfaceResource(resource, allResources),
-                "Microsoft.Compute/virtualMachines" => GenerateVirtualMachineResource(resource, allResources),
-                "Microsoft.Web/serverfarms" => GenerateAppServicePlanResource(resource, allResources),
-                "Microsoft.Web/sites" => GenerateWebAppResource(resource, allResources),
-                "Microsoft.Sql/servers" => GenerateSqlServerResource(resource, allResources),
+                "microsoft.storage/storageaccounts" => GenerateStorageAccountResource(resource, allResources),
+                "microsoft.network/virtualaetworks" => GenerateVirtualNetworkResource(resource, allResources),
+                "microsoft.network/networksecurityGroups" => GenerateNetworkSecurityGroupResource(resource, allResources),
+                "microsoft.network/publicipaddresses" => GeneratePublicIPResource(resource, allResources),
+                "microsoft.network/networkinterfaces" => GenerateNetworkInterfaceResource(resource, allResources),
+                "microsoft.compute/virtualMachines" => GenerateVirtualMachineResource(resource, allResources),
+                "microsoft.web/serverfarms" => GenerateAppServicePlanResource(resource, allResources),
+                "microsoft.web/sites" => GenerateWebAppResource(resource, allResources),
+                "microsoft.sql/servers" => GenerateSqlServerResource(resource, allResources),
                 "microsoft.documentdb/databaseaccounts" => GenerateCosmosDbResource(resource, allResources),
                 "microsoft.servicebus/namespaces" => GenerateServiceBusResource(resource, allResources),
-                "Microsoft.KeyVault/vaults" => GenerateKeyVaultResource(resource, allResources),
+                "microsoft.keyVault/vaults" => GenerateKeyVaultResource(resource, allResources),
+                "microsoft.insights/components" => GenerateApplicationInsightsResource(resource, allResources), 
+                "microsoft.insights/actiongroups" => GenerateActionGroupResource(resource, allResources),
                 _ => GenerateGenericResource(resource, allResources)
             };
         }
 
-        private string GetApiVersion(string resourceType)
+        private object GenerateApplicationInsightsResource(AzureResource resource, List<AzureResource> allResources)
         {
-            return resourceType.ToLowerInvariant() switch
+            var props = resource.Properties.RootElement;
+            var safeName = SanitizeName(resource.Name);
+            var dependsOn = GenerateDependsOn(resource, allResources);
+
+            var writableProps = new Dictionary<string, object>
             {
-                "microsoft.storage/storageaccounts" => "2023-01-01",
-                "microsoft.documentdb/databaseaccounts" => "2024-05-15",
-                "microsoft.servicebus/namespaces" => "2024-01-01",
-                "microsoft.sql/servers" => "2021-11-01",
-                "microsoft.web/serverfarms" => "2023-01-01",
-                "microsoft.web/sites" => "2023-01-01",
-                "microsoft.keyvault/vaults" => "2023-07-01",
-                "microsoft.network/virtualnetworks" => "2023-09-01",
-                "microsoft.network/networksecuritygroups" => "2023-09-01",
-                "microsoft.network/publicipaddresses" => "2023-09-01",
-                "microsoft.network/networkinterfaces" => "2023-09-01",
-                "microsoft.compute/virtualmachines" => "2023-09-01",
-                _ => "2023-05-01"
+                ["Application_Type"] = ExtractProperty(props, "Application_Type", "web"),
+                ["publicNetworkAccessForIngestion"] = ExtractProperty(props, "publicNetworkAccessForIngestion", "Enabled"),
+                ["publicNetworkAccessForQuery"] = ExtractProperty(props, "publicNetworkAccessForQuery", "Enabled")
+            };
+
+            // Add WorkspaceResourceId if it exists
+            if (props.TryGetProperty("WorkspaceResourceId", out var workspaceIdProp))
+            {
+                writableProps["WorkspaceResourceId"] = workspaceIdProp.GetString();
+            }
+
+            // Add RetentionInDays if it exists
+            if (props.TryGetProperty("RetentionInDays", out var retentionProp))
+            {
+                writableProps["RetentionInDays"] = retentionProp.GetInt32();
+            }
+
+            // Add DisableLocalAuth if it exists
+            if (props.TryGetProperty("DisableLocalAuth", out var disableLocalAuthProp))
+            {
+                writableProps["DisableLocalAuth"] = disableLocalAuthProp.GetBoolean();
+            }
+
+            return new Dictionary<string, object>
+            {
+                ["type"] = resource.Type,
+                ["apiVersion"] = resource.ApiVersion,
+                ["name"] = $"[parameters('{safeName}Name')]",
+                ["location"] = $"[parameters('{safeName}Location')]",
+                ["kind"] = resource.Kind ?? "web",
+                ["tags"] = ExtractTags(resource),
+                ["properties"] = writableProps,
+                ["dependsOn"] = dependsOn
             };
         }
+        private object GenerateActionGroupResource(AzureResource resource, List<AzureResource> allResources)
+        {
+            var props = resource.Properties.RootElement;
+            var safeName = SanitizeName(resource.Name);
+            var dependsOn = GenerateDependsOn(resource, allResources);
 
+            var writableProps = new Dictionary<string, object>
+            {
+                ["enabled"] = ExtractProperty(props, "enabled", true),
+                ["groupShortName"] = ExtractProperty(props, "groupShortName", "SmartDetect")
+            };
+
+            // Add various receiver arrays
+            var receiverTypes = new[] {
+        "emailReceivers", "smsReceivers", "webhookReceivers", "armRoleReceivers",
+        "azureFunctionReceivers", "logicAppReceivers", "azureAppPushReceivers",
+        "automationRunbookReceivers", "voiceReceivers", "itsmReceivers", "eventHubReceivers"
+    };
+
+            foreach (var receiverType in receiverTypes)
+            {
+                writableProps[receiverType] = ExtractProperty(props, receiverType, new object[0]);
+            }
+
+            return new Dictionary<string, object>
+            {
+                ["type"] = resource.Type,
+                ["apiVersion"] = resource.ApiVersion,
+                ["name"] = $"[parameters('{safeName}Name')]",
+                ["location"] = $"[parameters('{safeName}Location')]",
+                ["tags"] = ExtractTags(resource),
+                ["properties"] = writableProps,
+                ["dependsOn"] = dependsOn
+            };
+        }
         private object GenerateStorageAccountResource(AzureResource resource, List<AzureResource> allResources)
         {
             var props = resource.Properties.RootElement;
             var safeName = SanitizeName(resource.Name);
             var dependsOn = GenerateDependsOn(resource, allResources);
 
-            object? skuObj = resource.Sku?.RootElement.ValueKind == JsonValueKind.Object && resource.Sku.RootElement.EnumerateObject().Any()
-                ? JsonSerializer.Deserialize<object>(resource.Sku.RootElement.GetRawText())
-                : new { name = "Standard_LRS" };
+            object skuObj;
+            try
+            {
+                if (resource.Sku.RootElement.ValueKind == JsonValueKind.Object &&
+                    resource.Sku.RootElement.EnumerateObject().Any())
+                {
+                    skuObj = JsonSerializer.Deserialize<object>(resource.Sku.RootElement.GetRawText())
+                             ?? new { name = "F1", tier = "Free" };
+                }
 
-            object? identityObj = resource.Identity?.RootElement.ValueKind == JsonValueKind.Object && resource.Identity.RootElement.EnumerateObject().Any()
-                ? JsonSerializer.Deserialize<object>(resource.Identity.RootElement.GetRawText())
-                : null;
+                else
+                {
+                    skuObj = new { name = "Standard_LRS" };
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to parse SKU for storage account {ResourceName}, using default", resource.Name);
+                skuObj = new { name = "Standard_LRS" };
+            }
+            object? identityObj = null;
+            try
+            {
+                if (resource.Identity is JsonDocument doc &&
+                    doc.RootElement.ValueKind == JsonValueKind.Object &&
+                    doc.RootElement.EnumerateObject().Any())
+                {
+                    identityObj = JsonSerializer.Deserialize<object>(doc.RootElement.GetRawText());
+                }
+
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to parse Identity for storage account {ResourceName}", resource.Name);
+            }
 
             var kind = string.IsNullOrWhiteSpace(resource.Kind) ? "StorageV2" : resource.Kind;
 
@@ -221,10 +309,7 @@ namespace AzureDiscovery.Infrastructure.Services
             {
                 writableProps["networkAcls"] = JsonSerializer.Deserialize<object>(networkAclsProp.GetRawText());
             }
-
-            if (kind == "StorageV2" && skuObj is JsonElement skuEl && skuEl.TryGetProperty("name", out var skuNameEl) &&
-                skuNameEl.GetString()?.StartsWith("Standard_", StringComparison.OrdinalIgnoreCase) == true &&
-                !writableProps.ContainsKey("accessTier"))
+            if (kind == "StorageV2" && !writableProps.ContainsKey("accessTier"))
             {
                 writableProps["accessTier"] = "Hot";
             }
@@ -232,10 +317,10 @@ namespace AzureDiscovery.Infrastructure.Services
             var armResource = new Dictionary<string, object>
             {
                 ["type"] = resource.Type,
-                ["apiVersion"] = GetApiVersion(resource.Type),
+                ["apiVersion"] = resource.ApiVersion,
                 ["name"] = $"[parameters('{safeName}Name')]",
                 ["location"] = $"[parameters('{safeName}Location')]",
-                ["sku"] = skuObj,
+                ["sku"] = skuObj, // This is now guaranteed to have a value
                 ["kind"] = kind,
                 ["tags"] = ExtractTags(resource),
                 ["properties"] = writableProps,
@@ -291,13 +376,42 @@ namespace AzureDiscovery.Infrastructure.Services
             var safeName = SanitizeName(resource.Name);
             var dependsOn = GenerateDependsOn(resource, allResources);
 
-            object? skuObj = resource.Sku?.RootElement.ValueKind == JsonValueKind.Object && resource.Sku.RootElement.EnumerateObject().Any()
-                ? JsonSerializer.Deserialize<object>(resource.Sku.RootElement.GetRawText())
-                : new { name = "F1", tier = "Free" };
+            object skuObj;
+            try
+            {
+                if (resource.Sku.RootElement.ValueKind == JsonValueKind.Object &&
+                    resource.Sku.RootElement.EnumerateObject().Any())
+                {
+                    skuObj = JsonSerializer.Deserialize<object>(resource.Sku.RootElement.GetRawText())
+                             ?? new { name = "F1", tier = "Free" };
+                }
 
-            object? identityObj = resource.Identity?.RootElement.ValueKind == JsonValueKind.Object && resource.Identity.RootElement.EnumerateObject().Any()
-                ? JsonSerializer.Deserialize<object>(resource.Identity.RootElement.GetRawText())
-                : null;
+                else
+                {
+                    skuObj = new { name = "F1", tier = "Free" };
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to parse SKU for App Service Plan {ResourceName}, using default", resource.Name);
+                skuObj = new { name = "F1", tier = "Free" };
+            }
+
+            object? identityObj = null;
+            try
+            {
+                if (resource.Identity is JsonDocument doc &&
+                    doc.RootElement.ValueKind == JsonValueKind.Object &&
+                    doc.RootElement.EnumerateObject().Any())
+                {
+                    identityObj = JsonSerializer.Deserialize<object>(doc.RootElement.GetRawText());
+                }
+
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to parse Identity for App Service Plan {ResourceName}", resource.Name);
+            }
 
             var writableProps = new Dictionary<string, object>
             {
@@ -317,10 +431,10 @@ namespace AzureDiscovery.Infrastructure.Services
             var armResource = new Dictionary<string, object>
             {
                 ["type"] = resource.Type,
-                ["apiVersion"] = GetApiVersion(resource.Type),
+                ["apiVersion"] = resource.ApiVersion,
                 ["name"] = $"[parameters('{safeName}Name')]",
                 ["location"] = $"[parameters('{safeName}Location')]",
-                ["sku"] = skuObj,
+                ["sku"] = skuObj, // This is now guaranteed to have a value
                 ["tags"] = ExtractTags(resource),
                 ["properties"] = writableProps,
                 ["dependsOn"] = dependsOn
@@ -339,7 +453,7 @@ namespace AzureDiscovery.Infrastructure.Services
 
             // Check if Web App already has a linked App Service Plan
             var appServicePlan = allResources.FirstOrDefault(r =>
-                r.Type.Equals("Microsoft.Web/serverfarms", StringComparison.OrdinalIgnoreCase) &&
+                r.Type.Equals("microsoft.web/serverfarms", StringComparison.OrdinalIgnoreCase) &&
                 resource.Dependencies.Any(d => d.TargetResourceId == r.Id));
 
             string appServicePlanName;
@@ -355,7 +469,7 @@ namespace AzureDiscovery.Infrastructure.Services
                 var defaultPlanResource = new Dictionary<string, object>
                 {
                     ["type"] = "Microsoft.Web/serverfarms",
-                    ["apiVersion"] = GetApiVersion("Microsoft.Web/serverfarms"),
+                    ["apiVersion"] = resource.ApiVersion,
                     ["name"] = $"[parameters('{appServicePlanName}Name')]",
                     ["location"] = $"[parameters('{safeName}Location')]", // Same location as Web App
                     ["sku"] = new { name = "F1", tier = "Free" },
@@ -395,7 +509,7 @@ namespace AzureDiscovery.Infrastructure.Services
             var armResource = new Dictionary<string, object>
             {
                 ["type"] = resource.Type,
-                ["apiVersion"] = GetApiVersion(resource.Type),
+                ["apiVersion"] = resource.ApiVersion,
                 ["name"] = $"[parameters('{safeName}Name')]",
                 ["location"] = $"[parameters('{safeName}Location')]",
                 ["kind"] = resource.Kind ?? "app",
@@ -453,7 +567,7 @@ namespace AzureDiscovery.Infrastructure.Services
             return new
             {
                 type = resource.Type,
-                apiVersion = GetApiVersion(resource.Type),
+                apiVersion = resource.ApiVersion,
                 name = $"[parameters('{SanitizeName(resource.Name)}Name')]",
                 location = $"[parameters('{SanitizeName(resource.Name)}Location')]",
                 tags = ExtractTags(resource),
@@ -493,7 +607,7 @@ namespace AzureDiscovery.Infrastructure.Services
                             ["backupRetentionIntervalInHours"] = periodicProps.TryGetProperty("backupRetentionIntervalInHours", out var retentionProp)
                                 ? retentionProp.GetInt32() : 8,
                             ["backupStorageRedundancy"] = periodicProps.TryGetProperty("backupStorageRedundancy", out JsonElement redundancyProp)
-                                ? redundancyProp.GetString() ?? "Geo": "Geo"
+                                ? redundancyProp.GetString() ?? "Geo" : "Geo"
 
                         };
                         backupPolicy["periodicModeProperties"] = periodicModeProperties;
@@ -566,7 +680,7 @@ namespace AzureDiscovery.Infrastructure.Services
             return new
             {
                 type = resource.Type,
-                apiVersion = GetApiVersion(resource.Type),
+                apiVersion = resource.ApiVersion,
                 name = $"[parameters('{SanitizeName(resource.Name)}Name')]",
                 location = $"[parameters('{SanitizeName(resource.Name)}Location')]",
                 tags = ExtractTags(resource),
@@ -590,7 +704,7 @@ namespace AzureDiscovery.Infrastructure.Services
             return new
             {
                 type = resource.Type,
-                apiVersion = GetApiVersion(resource.Type),
+                apiVersion = resource.ApiVersion,
                 name = $"[parameters('{SanitizeName(resource.Name)}Name')]",
                 location = $"[parameters('{SanitizeName(resource.Name)}Location')]",
                 tags = ExtractTags(resource),
@@ -611,7 +725,7 @@ namespace AzureDiscovery.Infrastructure.Services
             return new
             {
                 type = resource.Type,
-                apiVersion = GetApiVersion(resource.Type),
+                apiVersion = resource.ApiVersion,
                 name = $"[parameters('{SanitizeName(resource.Name)}Name')]",
                 location = $"[parameters('{SanitizeName(resource.Name)}Location')]",
                 tags = ExtractTags(resource),
@@ -640,7 +754,7 @@ namespace AzureDiscovery.Infrastructure.Services
             var armResource = new Dictionary<string, object>
             {
                 ["type"] = resource.Type,
-                ["apiVersion"] = GetApiVersion(resource.Type),
+                ["apiVersion"] = resource.ApiVersion,
                 ["name"] = $"[parameters('{safeName}Name')]",
                 ["location"] = $"[parameters('{safeName}Location')]",
                 ["tags"] = ExtractTags(resource),
@@ -667,7 +781,7 @@ namespace AzureDiscovery.Infrastructure.Services
             return new
             {
                 type = resource.Type,
-                apiVersion = GetApiVersion(resource.Type),
+                apiVersion = resource.ApiVersion,
                 name = $"[parameters('{SanitizeName(resource.Name)}Name')]",
                 location = $"[parameters('{SanitizeName(resource.Name)}Location')]",
                 tags = ExtractTags(resource),
@@ -700,7 +814,7 @@ namespace AzureDiscovery.Infrastructure.Services
             var armResource = new Dictionary<string, object>
             {
                 ["type"] = resource.Type,
-                ["apiVersion"] = GetApiVersion(resource.Type),
+                ["apiVersion"] = resource.ApiVersion,
                 ["name"] = $"[parameters('{safeName}Name')]",
                 ["location"] = $"[parameters('{safeName}Location')]",
                 ["tags"] = ExtractTags(resource),
@@ -734,7 +848,7 @@ namespace AzureDiscovery.Infrastructure.Services
             var armResource = new Dictionary<string, object>
             {
                 ["type"] = resource.Type,
-                ["apiVersion"] = GetApiVersion(resource.Type),
+                ["apiVersion"] = resource.ApiVersion,
                 ["name"] = $"[parameters('{safeName}Name')]",
                 ["location"] = $"[parameters('{safeName}Location')]",
                 ["tags"] = ExtractTags(resource),
@@ -772,7 +886,7 @@ namespace AzureDiscovery.Infrastructure.Services
             var armResource = new Dictionary<string, object>
             {
                 ["type"] = resource.Type,
-                ["apiVersion"] = GetApiVersion(resource.Type),
+                ["apiVersion"] = resource.ApiVersion,
                 ["name"] = $"[parameters('{safeName}Name')]",
                 ["location"] = $"[parameters('{safeName}Location')]",
                 ["tags"] = ExtractTags(resource),
@@ -816,7 +930,7 @@ namespace AzureDiscovery.Infrastructure.Services
             var armResource = new Dictionary<string, object>
             {
                 ["type"] = resource.Type,
-                ["apiVersion"] = GetApiVersion(resource.Type),
+                ["apiVersion"] = resource.ApiVersion,
                 ["name"] = $"[parameters('{safeName}Name')]",
                 ["location"] = $"[parameters('{safeName}Location')]",
                 ["tags"] = ExtractTags(resource),
