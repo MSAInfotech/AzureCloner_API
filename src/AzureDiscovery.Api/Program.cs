@@ -7,9 +7,10 @@ using AzureDiscovery.Infrastructure.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Azure;
 using Microsoft.IdentityModel.Tokens;
+using Polly;
+using Polly.Timeout;
 using System.Text;
 using System.Text.Json.Serialization;
-using Polly;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -52,10 +53,18 @@ builder.Services.AddAzureClients(clientBuilder =>
 // Add resilient HTTP client
 builder.Services.AddHttpClient("ResilientClient")
     .AddTransientHttpErrorPolicy(policyBuilder =>
-        policyBuilder.WaitAndRetryAsync(3, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt))))
+        policyBuilder.WaitAndRetryAsync(3, retryAttempt =>
+            TimeSpan.FromSeconds(Math.Pow(2, retryAttempt))))
     .AddTransientHttpErrorPolicy(policyBuilder =>
         policyBuilder.CircuitBreakerAsync(5, TimeSpan.FromSeconds(30)))
-    .AddPolicyHandler(Policy.TimeoutAsync<HttpResponseMessage>(TimeSpan.FromSeconds(10)));
+    .AddPolicyHandler((request, cancellationToken) =>
+    {
+        return Policy.TimeoutAsync<HttpResponseMessage>(context =>{
+                if (context.TryGetValue("Timeout", out var timeoutObj) && timeoutObj is TimeSpan timeout){
+                    return timeout;
+                }return TimeSpan.FromSeconds(10);
+            },
+    TimeoutStrategy.Optimistic);});
 
 // Add application services
 builder.Services.AddScoped<IResourceGraphService, ResourceGraphService>();
