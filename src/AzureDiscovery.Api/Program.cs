@@ -9,6 +9,7 @@ using Microsoft.Extensions.Azure;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
 using System.Text.Json.Serialization;
+using Polly;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -48,9 +49,18 @@ builder.Services.AddAzureClients(clientBuilder =>
     clientBuilder.UseCredential(new DefaultAzureCredential());
 });
 
+// Add resilient HTTP client
+builder.Services.AddHttpClient("ResilientClient")
+    .AddTransientHttpErrorPolicy(policyBuilder =>
+        policyBuilder.WaitAndRetryAsync(3, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt))))
+    .AddTransientHttpErrorPolicy(policyBuilder =>
+        policyBuilder.CircuitBreakerAsync(5, TimeSpan.FromSeconds(30)))
+    .AddPolicyHandler(Policy.TimeoutAsync<HttpResponseMessage>(TimeSpan.FromSeconds(10)));
+
 // Add application services
 builder.Services.AddScoped<IResourceGraphService, ResourceGraphService>();
 builder.Services.AddScoped<IServiceBusService, ServiceBusService>();
+builder.Services.AddHostedService<TemplateProcessorService>();
 builder.Services.AddScoped<IBlobStorageService, BlobStorageService>();
 builder.Services.AddScoped<IResourceDependencyAnalyzer, ResourceDependencyAnalyzer>();
 builder.Services.AddScoped<IDiscoveryService, AzureResourceDiscoveryService>();
