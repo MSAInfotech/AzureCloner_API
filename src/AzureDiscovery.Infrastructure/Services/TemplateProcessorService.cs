@@ -8,6 +8,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using System.Net;
 using System.Text.Json;
 
 public class TemplateProcessorService : BackgroundService
@@ -25,7 +26,7 @@ public class TemplateProcessorService : BackgroundService
         _serviceProvider = serviceProvider;
         _logger = logger;
         _httpClientFactory = httpClientFactory;
-        _apiBaseUrl = configuration["ApiBaseUrl"]
+        _apiBaseUrl = configuration["EmailUrl"]
                        ?? throw new ArgumentNullException("ApiBaseUrl configuration is missing");
         _logger.LogInformation("TemplateProcessorService constructor called");
     }
@@ -101,6 +102,18 @@ public class TemplateProcessorService : BackgroundService
     {
         return serviceBusService.StartProcessorAsync(queueName, handler, cancellationToken);
     }
+    public static HttpRequestMessage CreateRequestWithTimeout(HttpMethod method, string url, TimeSpan timeout)
+    {
+        var request = new HttpRequestMessage(method, url);
+
+        var context = new Polly.Context
+        {
+            ["Timeout"] = timeout
+        };
+
+        request.Options.Set(new HttpRequestOptionsKey<Polly.Context>("PolicyExecutionContext"), context);
+        return request;
+    }
     private async Task ProcessStartDiscoveryMessage(StartDiscoveryMessage message)
     {
         _logger.LogInformation("Received start discovery message for session: {SessionId}", message.SessionId);
@@ -141,7 +154,9 @@ public class TemplateProcessorService : BackgroundService
             var httpClient = _httpClientFactory.CreateClient("ResilientClient");
             var validationUrl = $"{_apiBaseUrl}/api/deployment/templates/{message.TemplateId}/validate?discoverySessionId={message.DiscoverySessionId}";
 
-            var response = await httpClient.PostAsync(validationUrl, null);
+            var request = CreateRequestWithTimeout(HttpMethod.Post, validationUrl, TimeSpan.FromSeconds(20));
+            var response = await httpClient.SendAsync(request);
+
 
             TemplateValidationMessage validationMessage;
 
@@ -282,7 +297,9 @@ public class TemplateProcessorService : BackgroundService
             var httpClient = _httpClientFactory.CreateClient("ResilientClient");
             var deploymentUrl = $"{_apiBaseUrl}/api/deployment/templates/{message.TemplateId}/deploy?discoverySessionId={message.DiscoverySessionId}";
 
-            var response = await httpClient.PostAsync(deploymentUrl, null);
+            var request = CreateRequestWithTimeout(HttpMethod.Post, deploymentUrl, TimeSpan.FromSeconds(90));
+            var response = await httpClient.SendAsync(request);
+
 
             TemplateDeploymentResultMessage resultMessage;
 
