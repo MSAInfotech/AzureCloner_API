@@ -25,6 +25,52 @@ namespace AzureDiscovery.Api.Controllers
         [HttpPost("start-deployment")]
         public async Task<ActionResult<DeploymentSession>> StartDeployment([FromBody] DeploymentRequest request)
         {
+            //try
+            //{
+            //    Guid targetSubscriptionGuid = Guid.Parse(request.TargetSubscriptionId);
+            //    AzureConnectionResponse? GetTargetSubscriptionId = await _azureConnectionService.GetConnectionsById(targetSubscriptionGuid);
+            //    request.TargetSubscriptionId = GetTargetSubscriptionId.SubscriptionId;
+
+            //    _logger.LogInformation("Creating deployment session for discovery {DiscoverySessionId}", request.DiscoverySessionId);
+            //    var session = await _deploymentService.CreateDeploymentSessionAsync(request);
+
+            //    // Step 2: Validate Templates
+            //    _logger.LogInformation("Validating all templates for deployment session {SessionId}", session.Id);
+            //    var validationResult = await _deploymentService.ValidateAllTemplatesAsync(session.Id, request.DiscoverySessionId);
+
+            //    if (!validationResult.IsValid)
+            //    {
+            //        return BadRequest(new
+            //        {
+            //            Error = "Validation failed",
+            //            Details = validationResult.Errors
+            //        });
+            //    }
+
+            //    // Step 3: Deploy Templates
+            //    _logger.LogInformation("Deploying all templates for session {SessionId}", session.Id);
+            //    var deploymentResult = await _deploymentService.DeployAllTemplatesAsync(session.Id, request.DiscoverySessionId);
+
+            //    return Ok(new
+            //    {
+            //        Message = "Deployment completed successfully",
+            //        SessionId = session.Id,
+            //        DeploymentResult = deploymentResult
+            //    });
+            //}
+            //catch (ArgumentException ex)
+            //{
+            //    return BadRequest(new { Error = ex.Message });
+            //}
+            //catch (InvalidOperationException ex)
+            //{
+            //    return BadRequest(new { Error = ex.Message });
+            //}
+            //catch (Exception ex)
+            //{
+            //    _logger.LogError(ex, "Failed to create deployment session");
+            //    return StatusCode(500, new { Error = "Failed to create deployment session", Details = ex.Message });
+            //}
             try
             {
                 Guid targetSubscriptionGuid = Guid.Parse(request.TargetSubscriptionId);
@@ -34,42 +80,14 @@ namespace AzureDiscovery.Api.Controllers
                 _logger.LogInformation("Creating deployment session for discovery {DiscoverySessionId}", request.DiscoverySessionId);
                 var session = await _deploymentService.CreateDeploymentSessionAsync(request);
 
-                // Step 2: Validate Templates
-                _logger.LogInformation("Validating all templates for deployment session {SessionId}", session.Id);
-                var validationResult = await _deploymentService.ValidateAllTemplatesAsync(session.Id, request.DiscoverySessionId);
+                _logger.LogInformation("Started automated template processing for deployment session {SessionId}", session.Id);
 
-                if (!validationResult.IsValid)
-                {
-                    return BadRequest(new
-                    {
-                        Error = "Validation failed",
-                        Details = validationResult.Errors
-                    });
-                }
-
-                // Step 3: Deploy Templates
-                _logger.LogInformation("Deploying all templates for session {SessionId}", session.Id);
-                var deploymentResult = await _deploymentService.DeployAllTemplatesAsync(session.Id, request.DiscoverySessionId);
-
-                return Ok(new
-                {
-                    Message = "Deployment completed successfully",
-                    SessionId = session.Id,
-                    DeploymentResult = deploymentResult
-                });
-            }
-            catch (ArgumentException ex)
-            {
-                return BadRequest(new { Error = ex.Message });
-            }
-            catch (InvalidOperationException ex)
-            {
-                return BadRequest(new { Error = ex.Message });
+                return Ok(session);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to create deployment session");
-                return StatusCode(500, new { Error = "Failed to create deployment session", Details = ex.Message });
+                _logger.LogError(ex, "Failed to start deployment");
+                return StatusCode(500, new { Error = "Failed to start deployment", Details = ex.Message });
             }
         }
 

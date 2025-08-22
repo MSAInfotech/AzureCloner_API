@@ -7,6 +7,8 @@ using AzureDiscovery.Infrastructure.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Azure;
 using Microsoft.IdentityModel.Tokens;
+using Polly;
+using Polly.Timeout;
 using System.Text;
 using System.Text.Json.Serialization;
 
@@ -48,9 +50,26 @@ builder.Services.AddAzureClients(clientBuilder =>
     clientBuilder.UseCredential(new DefaultAzureCredential());
 });
 
+// Add resilient HTTP client
+builder.Services.AddHttpClient("ResilientClient")
+    .AddTransientHttpErrorPolicy(policyBuilder =>
+        policyBuilder.WaitAndRetryAsync(3, retryAttempt =>
+            TimeSpan.FromSeconds(Math.Pow(2, retryAttempt))))
+    .AddTransientHttpErrorPolicy(policyBuilder =>
+        policyBuilder.CircuitBreakerAsync(5, TimeSpan.FromSeconds(30)))
+    .AddPolicyHandler((request, cancellationToken) =>
+    {
+        return Policy.TimeoutAsync<HttpResponseMessage>(context =>{
+                if (context.TryGetValue("Timeout", out var timeoutObj) && timeoutObj is TimeSpan timeout){
+                    return timeout;
+                }return TimeSpan.FromSeconds(10);
+            },
+    TimeoutStrategy.Optimistic);});
+
 // Add application services
 builder.Services.AddScoped<IResourceGraphService, ResourceGraphService>();
 builder.Services.AddScoped<IServiceBusService, ServiceBusService>();
+builder.Services.AddHostedService<TemplateProcessorService>();
 builder.Services.AddScoped<IBlobStorageService, BlobStorageService>();
 builder.Services.AddScoped<IResourceDependencyAnalyzer, ResourceDependencyAnalyzer>();
 builder.Services.AddScoped<IDiscoveryService, AzureResourceDiscoveryService>();

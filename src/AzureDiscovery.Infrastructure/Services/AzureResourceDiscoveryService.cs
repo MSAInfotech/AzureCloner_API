@@ -6,6 +6,7 @@ using AzureDiscovery.Core.Models;
 using AzureDiscovery.Infrastructure.Data;
 using AzureDiscovery.Infrastructure.Configuration;
 using System.Text.Json;
+using AzureDiscovery.Core.Models.Messages;
 
 namespace AzureDiscovery.Infrastructure.Services
 {
@@ -58,13 +59,18 @@ namespace AzureDiscovery.Infrastructure.Services
             try
             {
                 // Start the discovery process
-                await ProcessDiscoveryAsync(session);
-                var discoveredResources = await _dbContext.AzureResources.Where(r => r.Id.StartsWith(session.Id.ToString()))
-                                         .OrderBy(r => r.DependencyLevel).ToListAsync();
+                var message = new StartDiscoveryMessage { SessionId = session.Id };
+                await _serviceBusService.SendMessageAsync("resource-discovery-queue", message);
+
+                _logger.LogInformation("Discovery session {SessionId} queued for background processing.", session.Id);
+
+                //await ProcessDiscoveryAsync(session);
+                //var discoveredResources = await _dbContext.AzureResources.Where(r => r.Id.StartsWith(session.Id.ToString()))
+                //                         .OrderBy(r => r.DependencyLevel).ToListAsync();
                 return new DiscoveryResult
                 {
                     Session = session,
-                    DiscoveredResources = discoveredResources
+                    DiscoveredResources = new List<AzureResource>() // Empty now, will be populated later
                 };
 
             }
@@ -98,26 +104,18 @@ namespace AzureDiscovery.Infrastructure.Services
                 .OrderBy(r => r.DependencyLevel)
                 .ThenBy(r => r.Name)
                 .ToListAsync();
-
-            //var resources = await _dbContext.AzureResources
-            //    .Where(r => r.Id.StartsWith(sessionId.ToString()))
-            //    .OrderBy(r => r.DependencyLevel)
-            //    .ThenBy(r => r.Name)
-            //    .ToListAsync();
-
-            //var dependencies = await _dbContext.ResourceDependencies
-            //    .Where(d => resources.Select(r => r.Id).Contains(d.SourceResourceId))
-            //    .ToListAsync();
-
-            //foreach (var resource in resources)
-            //{
-            //    resource.Dependencies = dependencies.Where(d => d.SourceResourceId == resource.Id).ToList();
-            //}
             return resources;
         }
 
-        private async Task ProcessDiscoveryAsync(DiscoverySession session)
+        public async Task ProcessDiscoveryAsync(Guid sessionId)
         {
+            // Fetch the session from the database
+            var session = await _dbContext.DiscoverySessions.FindAsync(sessionId);
+            if (session == null)
+            {
+                _logger.LogError("ProcessDiscoveryAsync failed: Session {SessionId} not found.", sessionId);
+                return;
+            }
             _logger.LogInformation("Processing discovery for session {SessionId}", session.Id);
 
             // Phase 1: Discover resources using Resource Graph API
@@ -136,10 +134,10 @@ namespace AzureDiscovery.Infrastructure.Services
             await CalculateDependencyLevelsAsync(session);
 
             // Phase 5: Generate ARM templates
-            await GenerateArmTemplatesAsync(session);
+            // await GenerateArmTemplatesAsync(session);
 
             // Complete the session
-            session.Status = SessionStatus.Completed;
+            session.Status = SessionStatus.Completed;   
             session.CompletedAt = DateTime.UtcNow;
             await _dbContext.SaveChangesAsync();
 
@@ -209,7 +207,8 @@ namespace AzureDiscovery.Infrastructure.Services
                         Kind = resource.Kind ?? string.Empty,
                         Properties = JsonDocument.Parse(JsonSerializer.Serialize(resource.Properties)),
                         Tags = JsonDocument.Parse(JsonSerializer.Serialize(resource.Tags ?? new Dictionary<string, string>())),
-                        Status = ResourceStatus.Discovered
+                        Status = ResourceStatus.Discovered,
+                        ApiVersion = resource.ApiVersion
                     };
 
                     azureResources.Add(azureResource);
@@ -226,11 +225,12 @@ namespace AzureDiscovery.Infrastructure.Services
                 _dbContext.AzureResources.AddRange(azureResources);
                 await _dbContext.SaveChangesAsync();
 
+                // comment this because No background service reading from the queue
                 // Queue resources for detailed analysis
-                foreach (var resource in azureResources)
-                {
-                    await QueueResourceForAnalysisAsync(session.Id, resource.Id);
-                }
+                //foreach (var resource in azureResources)
+                //{
+                //    await QueueResourceForAnalysisAsync(session.Id, resource.Id);
+                //}
             }
         }
 
@@ -356,37 +356,11 @@ namespace AzureDiscovery.Infrastructure.Services
             await _dbContext.SaveChangesAsync();
         }
 
-        private async Task QueueResourceForAnalysisAsync(Guid sessionId, string resourceId)
-        {
-            try
-            {
-                var message = new ResourceAnalysisMessage
-                {
-                    SessionId = sessionId,
-                    ResourceId = resourceId,
-                    QueuedAt = DateTime.UtcNow
-                };
-
-                await _serviceBusService.SendMessageAsync("resource-analysis-queue", message);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to queue resource {ResourceId} for analysis", resourceId);
-            }
-        }
-
         private string ExtractResourceId(string fullResourceId)
         {
             // Extract the resource name from the full Azure resource ID
             var parts = fullResourceId.Split('/');
             return parts.Length > 0 ? parts[^1] : fullResourceId;
         }
-    }
-
-    public class ResourceAnalysisMessage
-    {
-        public Guid SessionId { get; set; }
-        public string ResourceId { get; set; } = string.Empty;
-        public DateTime QueuedAt { get; set; }
     }
 }

@@ -7,6 +7,7 @@ using AzureDiscovery.Infrastructure.Data;
 using AzureDiscovery.Infrastructure.Configuration;
 using System.Text.Json;
 using System.Text;
+using AzureDiscovery.Core.Models.Messages;
 
 namespace AzureDiscovery.Infrastructure.Services
 {
@@ -394,6 +395,8 @@ namespace AzureDiscovery.Infrastructure.Services
             // Group resources by resource group for template generation
             var resourceGroups = resources.GroupBy(r => r.ResourceGroup);
             var templateDeployments = new List<TemplateDeployment>();
+            int templateCount = 0;
+
 
             foreach (var rgGroup in resourceGroups)
             {
@@ -420,8 +423,26 @@ namespace AzureDiscovery.Infrastructure.Services
                     Status = TemplateStatus.Created,
                     DependencyLevel = dependencyLevel
                 };
+                _dbContext.TemplateDeployments.Add(templateDeployment);
+                await _dbContext.SaveChangesAsync(); // Save immediately so you get the Id
 
-                templateDeployments.Add(templateDeployment);
+                // Now send the message
+                var message = new TemplateCreatedMessage
+                {
+                    TemplateId = templateDeployment.Id,
+                    DeploymentSessionId = session.Id,
+                    DiscoverySessionId = session.DiscoverySessionId,
+                    TemplateName = templateDeployment.TemplateName,
+                    ResourceGroupName = templateDeployment.ResourceGroupName,
+                    DependencyLevel = templateDeployment.DependencyLevel,
+                    CreatedAt = DateTime.UtcNow
+                };
+
+                await _serviceBusService.SendMessageAsync("template-created-queue", message);
+                _logger.LogInformation("Sent template created message for template {TemplateId}", templateDeployment.Id);
+
+                templateCount++;
+                //templateDeployments.Add(templateDeployment);
 
                 // Store template in blob storage for backup
                 //await _blobStorageService.UploadTemplateAsync("deployment-templates", $"{templateName}.json", template);
@@ -430,9 +451,11 @@ namespace AzureDiscovery.Infrastructure.Services
 
             }
 
-            _dbContext.TemplateDeployments.AddRange(templateDeployments);
-            session.TotalTemplates = templateDeployments.Count;
-            await _dbContext.SaveChangesAsync();
+            //_dbContext.TemplateDeployments.AddRange(templateDeployments);
+            //session.TotalTemplates = templateDeployments.Count;
+            //await _dbContext.SaveChangesAsync();
+            session.TotalTemplates = templateCount;
+            await _dbContext.SaveChangesAsync(); // Update session info
         }
 
         //private object GenerateParameters(List<AzureResource> resources, Dictionary<string, string> userParameters)
