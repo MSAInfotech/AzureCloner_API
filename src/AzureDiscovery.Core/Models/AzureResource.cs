@@ -23,7 +23,8 @@ namespace AzureDiscovery.Core.Models
         public ResourceStatus Status { get; set; } = ResourceStatus.Discovered;
         public string? ParentResourceId { get; set; }
         public int DependencyLevel { get; set; } = 0;
-        
+        public Guid ConnectionId { get; set; }
+
         // Navigation properties
         public virtual ICollection<ResourceDependency> Dependencies { get; set; } = new List<ResourceDependency>();
         public virtual ICollection<ResourceDependency> DependentResources { get; set; } = new List<ResourceDependency>();

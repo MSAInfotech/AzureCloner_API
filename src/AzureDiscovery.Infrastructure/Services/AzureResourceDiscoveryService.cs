@@ -64,7 +64,7 @@ namespace AzureDiscovery.Infrastructure.Services
 
                 _logger.LogInformation("Discovery session {SessionId} queued for background processing.", session.Id);
 
-                //await ProcessDiscoveryAsync(session);
+                //await ProcessDiscoveryAsync(session.Id);
                 //var discoveredResources = await _dbContext.AzureResources.Where(r => r.Id.StartsWith(session.Id.ToString()))
                 //                         .OrderBy(r => r.DependencyLevel).ToListAsync();
                 return new DiscoveryResult
@@ -77,6 +77,63 @@ namespace AzureDiscovery.Infrastructure.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error during discovery session {SessionId}", session.Id);
+                session.Status = SessionStatus.Failed;
+                session.ErrorMessage = ex.Message;
+                session.CompletedAt = DateTime.UtcNow;
+                await _dbContext.SaveChangesAsync();
+                throw;
+            }
+        }
+
+        public async Task<DiscoveryResult> GetExistingDiscovery(DiscoveryRequest request)
+        {
+            _logger.LogInformation("Start checking discovery session for subscription {SubscriptionId}", request.SourceSubscriptionId);
+
+            var session = new DiscoverySession
+            {
+                Name = request.Name,
+                ConnectionId = request.ConnectionId,
+                SourceSubscriptionId = request.SourceSubscriptionId,
+                TargetSubscriptionId = request.TargetSubscriptionId,
+                ResourceGroupFilters = request.ResourceGroupFilters,
+                ResourceTypeFilters = request.ResourceTypeFilters,
+                Status = SessionStatus.InProgress
+            };
+            try
+            {
+                // Get latest discoveredId
+                var discoveredId = _dbContext.AzureResources
+                    .Where(r => r.ConnectionId == request.ConnectionId)
+                    .OrderByDescending(x => x.DiscoveredAt)
+                    .Select(g => g.Id)
+                    .FirstOrDefault();
+
+                if (!string.IsNullOrEmpty(discoveredId))
+                {
+                    var prefix = discoveredId;
+                    var slashIndex = discoveredId.IndexOf('/');
+                    if (slashIndex > 0)
+                    {
+                        prefix = discoveredId.Substring(0, slashIndex);
+                    }
+
+                    var discoveredResources = _dbContext.AzureResources.Where(x => x.Id.StartsWith(prefix)).ToList();
+                    return new DiscoveryResult
+                    {
+                        Session = session,
+                        DiscoveredResources = discoveredResources
+                    };
+                }
+                return new DiscoveryResult
+                {
+                    Session = session,
+                    DiscoveredResources = new List<AzureResource>()
+                };
+
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during checking existing discovery session {SessionId}", session.Id);
                 session.Status = SessionStatus.Failed;
                 session.ErrorMessage = ex.Message;
                 session.CompletedAt = DateTime.UtcNow;
@@ -137,7 +194,7 @@ namespace AzureDiscovery.Infrastructure.Services
             // await GenerateArmTemplatesAsync(session);
 
             // Complete the session
-            session.Status = SessionStatus.Completed;   
+            session.Status = SessionStatus.Completed;
             session.CompletedAt = DateTime.UtcNow;
             await _dbContext.SaveChangesAsync();
 
@@ -152,7 +209,7 @@ namespace AzureDiscovery.Infrastructure.Services
             var resources = await _resourceGraphService.DiscoverResourcesAsync(
                 session.SourceSubscriptionId,
                 session.ResourceGroupFilters,
-                session.ResourceTypeFilters, 
+                session.ResourceTypeFilters,
                 session.Id);
 
             _logger.LogInformation("Discovered {Count} resources for session {SessionId}", resources.Count, session.Id);
@@ -208,7 +265,8 @@ namespace AzureDiscovery.Infrastructure.Services
                         Properties = JsonDocument.Parse(JsonSerializer.Serialize(resource.Properties)),
                         Tags = JsonDocument.Parse(JsonSerializer.Serialize(resource.Tags ?? new Dictionary<string, string>())),
                         Status = ResourceStatus.Discovered,
-                        ApiVersion = resource.ApiVersion
+                        ApiVersion = resource.ApiVersion,
+                        ConnectionId = session.ConnectionId
                     };
 
                     azureResources.Add(azureResource);

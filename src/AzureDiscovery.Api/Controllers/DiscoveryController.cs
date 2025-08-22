@@ -35,6 +35,22 @@ namespace AzureDiscovery.Api.Controllers
             }
         }
 
+        [HttpPost("check")]
+        public async Task<ActionResult<DiscoveryResult>> GetExistingDiscovery([FromBody] DiscoveryRequest request)
+        {
+            try
+            {
+                _logger.LogInformation("Start checking discovery for subscription {SubscriptionId}", request.SourceSubscriptionId);
+                var session = await _discoveryService.GetExistingDiscovery(request);
+                return Ok(session);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to check discovery session");
+                return StatusCode(500, new { Error = "Failed to check discovery session", Details = ex.Message });
+            }
+        }
+
         [HttpGet("{sessionId}/status")]
         public async Task<ActionResult<DiscoverySession>> GetDiscoveryStatus(Guid sessionId)
         {

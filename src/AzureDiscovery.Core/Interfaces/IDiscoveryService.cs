@@ -5,6 +5,7 @@ namespace AzureDiscovery.Core.Interfaces
     public interface IDiscoveryService
     {
         Task<DiscoveryResult> StartDiscoveryAsync(DiscoveryRequest request);
+        Task<DiscoveryResult> GetExistingDiscovery(DiscoveryRequest request);
         Task<DiscoverySession> GetDiscoveryStatusAsync(Guid sessionId);
         Task<List<AzureResource>> GetDiscoveredResourcesAsync(Guid sessionId);
     }
