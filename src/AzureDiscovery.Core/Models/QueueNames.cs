@@ -12,7 +12,7 @@ namespace AzureDiscovery.Core.Models
         public const string TemplateValidation = "template-validation-queue";
         public const string TemplateDeployment = "template-deployment-queue";
         public const string TemplateDeploymentResult = "template-deployment-result-queue";
-        public const string ResourceDiscovery = "resource-discovery-queue";
+        public const string ResourceDiscovery = "resource-discovery";
     }
 
 }
