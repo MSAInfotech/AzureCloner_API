@@ -118,28 +118,54 @@ public class TemplateProcessorService : BackgroundService
     {
         _logger.LogInformation("Received start discovery message for session: {SessionId}", message.SessionId);
 
-        // Create a new scope for this message processing (important!)
-        using var scope = _serviceProvider.CreateScope();
-        // Resolve the discovery service
-        var discoveryService = scope.ServiceProvider.GetRequiredService<IDiscoveryService>();
-
         try
         {
-            // Cast to the concrete type to access the ProcessDiscoveryAsync method.
-            if (discoveryService is AzureResourceDiscoveryService concreteService)
+            // Immediately acknowledge the message to prevent dead lettering
+            _logger.LogInformation("Acknowledging message for session {SessionId}", message.SessionId);
+
+            // Fire and forget the long-running process
+            _ = Task.Run(async () =>
             {
-                await concreteService.ProcessDiscoveryAsync(message.SessionId);
-                _logger.LogInformation("Successfully processed discovery for session {SessionId}", message.SessionId);
-            }
-            else
-            {
-                _logger.LogError("Discovery service instance is not of expected type AzureResourceDiscoveryService. Cannot call ProcessDiscoveryAsync.");
-            }
+                try
+                {
+                    using var scope = _serviceProvider.CreateScope();
+                    var discoveryService = scope.ServiceProvider.GetRequiredService<IDiscoveryService>();
+
+                    if (discoveryService is AzureResourceDiscoveryService concreteService)
+                    {
+                        await concreteService.ProcessDiscoveryAsync(message.SessionId);
+                        _logger.LogInformation("Successfully processed discovery for session {SessionId}", message.SessionId);
+                    }
+                    else
+                    {
+                        _logger.LogError("Discovery service instance is not of expected type AzureResourceDiscoveryService");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error in background discovery processing for session {SessionId}", message.SessionId);
+
+                    // Update session status to failed
+                    using var scope = _serviceProvider.CreateScope();
+                    var dbContext = scope.ServiceProvider.GetRequiredService<DiscoveryDbContext>();
+                    var session = await dbContext.DiscoverySessions.FindAsync(message.SessionId);
+                    if (session != null)
+                    {
+                        session.Status = SessionStatus.Failed;
+                        session.ErrorMessage = ex.Message;
+                        session.CompletedAt = DateTime.UtcNow;
+                        await dbContext.SaveChangesAsync();
+                    }
+                }
+            });
+
+            // Message is completed immediately - no blocking
+            _logger.LogInformation("Message acknowledged and processing started in background for session {SessionId}", message.SessionId);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error processing discovery message for session {SessionId}", message.SessionId);
-            throw;
+            _logger.LogError(ex, "Error acknowledging discovery message for session {SessionId}", message.SessionId);
+            throw; // This will dead letter the message
         }
     }
     private async Task ProcessTemplateCreatedMessage(TemplateCreatedMessage message)

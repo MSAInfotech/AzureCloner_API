@@ -60,7 +60,7 @@ namespace AzureDiscovery.Infrastructure.Services
             {
                 // Start the discovery process
                 var message = new StartDiscoveryMessage { SessionId = session.Id };
-                await _serviceBusService.SendMessageAsync("resource-discovery-queue", message);
+                await _serviceBusService.SendMessageAsync(QueueNames.ResourceDiscovery, message);
 
                 _logger.LogInformation("Discovery session {SessionId} queued for background processing.", session.Id);
 
