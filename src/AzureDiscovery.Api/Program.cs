@@ -123,7 +123,13 @@ if (!string.IsNullOrEmpty(builder.Configuration["AzureDiscovery:StorageConnectio
     healthChecksBuilder.AddAzureBlobStorage(
         builder.Configuration["AzureDiscovery:StorageConnectionString"]!);
 }
-
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowReact",
+        policy => policy.WithOrigins("http://localhost:3000") // Or your deployed frontend URL
+                        .AllowAnyHeader()
+                        .AllowAnyMethod());
+});
 builder.Services.AddAuthentication("Bearer")
     .AddJwtBearer("Bearer", options =>
     {
@@ -140,15 +146,6 @@ builder.Services.AddAuthentication("Bearer")
         };
     });
 
-builder.Services.AddCors(options =>
-{
-    options.AddPolicy("AllowReact",
-        policy => policy.AllowAnyOrigin()
-        .AllowAnyMethod()
-        .AllowAnyHeader()
-        .SetIsOriginAllowed(origin => true));
-});
-
 var app = builder.Build();
 
 // Configure the HTTP request pipeline
@@ -157,11 +154,9 @@ if (app.Environment.IsDevelopment())
     app.UseSwagger();
     app.UseSwaggerUI();
 }
-
-app.UseHttpsRedirection();
-app.UseAuthentication();
-app.UseAuthorization();
 app.UseCors("AllowReact");
+app.UseHttpsRedirection();
+app.UseAuthorization();
 app.MapControllers();
 app.MapHealthChecks("/health");
 
