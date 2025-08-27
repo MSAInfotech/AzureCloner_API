@@ -1,7 +1,5 @@
 ﻿using AzureDiscovery.Core.Interfaces;
 using Microsoft.AspNetCore.Mvc;
-using System;
-using static Microsoft.ApplicationInsights.MetricDimensionNames.TelemetryContext;
 
 namespace AzureDiscovery.Api.Controllers
 {
@@ -108,6 +106,35 @@ namespace AzureDiscovery.Api.Controllers
                 });
             }
         }
+        [HttpGet("{id:guid}")]
+        public async Task<ActionResult> GetConnectionById(Guid id)
+        {
+            _logger.LogInformation("Fetching Azure connections of : {ID}", id);
+
+            try
+            {
+                var connections = await _azureConnectionService.GetConnectionsByIdAsync(id);
+
+                return Ok(new ApiResponse<AzureConnectionResponse>
+                {
+                    Success = true,
+                    Message = "Connections retrieved successfully",
+                    Data = connections
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error fetching connections");
+
+                return StatusCode(500, new ApiResponse<object>
+                {
+                    Success = false,
+                    Message = "Internal server error while fetching connections",
+                    Errors = new List<string> { ex.Message }
+                });
+            }
+        }
+
         [HttpDelete("{id:guid}")]
         public async Task<IActionResult> DeleteConnection(Guid id)
         {
@@ -119,6 +146,33 @@ namespace AzureDiscovery.Api.Controllers
                 {
                     Success = true,
                     Message = "Connection deleted successfully"
+                });
+            }
+
+            return NotFound(new ApiResponse<object>
+            {
+                Success = false,
+                Message = "Connection not found"
+            });
+        }
+
+        [HttpPut("{id:guid}")]
+        public async Task<IActionResult> UpdateConnection(Guid id, [FromBody] AzureConnectionRequest request)
+        {
+            var validationResult = await _azureConnectionService.ValidateConnectionAsync(request);
+            if (!validationResult.IsValid)
+            {
+                _logger.LogWarning("Validation failed for Azure connection: {Reason}", validationResult.ErrorMessage);
+                throw new InvalidOperationException(validationResult.ErrorMessage);
+            }
+            var updated = await _azureConnectionService.UpdateConnectionAsync(id, request);
+
+            if (updated)
+            {
+                return Ok(new ApiResponse<object>
+                {
+                    Success = true,
+                    Message = "Connection updated successfully"
                 });
             }
 

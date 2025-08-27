@@ -1,5 +1,4 @@
-﻿using Azure.Core;
-using Azure.Identity;
+﻿using Azure.Identity;
 using Azure.ResourceManager;
 using AzureDiscovery.Core.Interfaces;
 using AzureDiscovery.Core.Models;
@@ -7,13 +6,8 @@ using AzureDiscovery.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-using Microsoft.Identity.Client.Platforms.Features.DesktopOs.Kerberos;
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
-using System.Threading.Tasks;
 
 namespace AzureDiscovery.Infrastructure.Services
 {
@@ -47,6 +41,29 @@ namespace AzureDiscovery.Infrastructure.Services
 
             await SaveConnectionAsync(request);
             return validationResult;
+        }
+        public async Task<bool> UpdateConnectionAsync(Guid id, AzureConnectionRequest request)
+        {
+            var connection = await _context.AzureConnections.FirstOrDefaultAsync(x => x.Id == id);
+
+            if (connection == null)
+                return false;
+
+            connection.Name = request.Name;
+            connection.SubscriptionId = request.SubscriptionId;
+            connection.TenantId = request.TenantId;
+            connection.ClientId = request.ClientId;  
+            // Only update ClientSecret if it has changed
+            var decryptedSecret = DecryptClientSecret(connection.ClientSecret);
+            if (decryptedSecret != request.ClientSecret)
+            {
+                connection.ClientSecret = EncryptClientSecret(request.ClientSecret);
+            }
+            connection.Environment = request.Environment;
+            connection.UpdatedAt = DateTime.UtcNow;
+            _context.AzureConnections.Update(connection);
+            await _context.SaveChangesAsync();
+            return true;
         }
         public async Task<AzureConnectionValidationResult> ValidateConnectionAsync(AzureConnectionRequest request)
         {
@@ -220,11 +237,35 @@ namespace AzureDiscovery.Infrastructure.Services
                     Environment = c.Environment,
                     Status = c.Status,
                     LastValidated = c.LastValidated,
-                    CreatedAt = c.CreatedAt
+                    CreatedAt = c.CreatedAt,
+                    ClientSecret = c.ClientSecret
                 })
                 .ToListAsync();
 
             return connections;
+        }
+        public async Task<AzureConnectionResponse> GetConnectionsByIdAsync(Guid id)
+        {
+            var query = await _context.AzureConnections.Where(x => x.Id == id).FirstOrDefaultAsync();
+            if (query == null)
+                return null;
+
+            var decryptClientSecret = DecryptClientSecret(query.ClientSecret);
+
+            var AzureConnectionResponse = new AzureConnectionResponse
+            {
+                Id = query.Id,
+                Name = query.Name,
+                SubscriptionId = query.SubscriptionId,
+                TenantId = query.TenantId,
+                ClientId = query.ClientId,
+                Environment = query.Environment,
+                Status = query.Status,
+                LastValidated = query.LastValidated,
+                ClientSecret = decryptClientSecret
+            };
+
+            return AzureConnectionResponse;
         }
         public async Task<List<AzureConnectionResponse>> GetConnectionIfUsedInDiscovery()
         {

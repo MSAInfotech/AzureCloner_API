@@ -1,9 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.ComponentModel.DataAnnotations;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿using System.ComponentModel.DataAnnotations;
 
 namespace AzureDiscovery.Core.Interfaces
 {
@@ -16,6 +11,8 @@ namespace AzureDiscovery.Core.Interfaces
         Task<AzureConnectionResponse> GetConnectionsById(Guid id);
         Task<List<AzureConnectionResponse>> GetConnectionIfUsedInDiscovery();
         Task<bool> DeleteConnectionAsync(Guid id);
+        Task<bool> UpdateConnectionAsync(Guid id, AzureConnectionRequest request);
+        Task<AzureConnectionResponse> GetConnectionsByIdAsync(Guid id);
     }
     public class AzureConnectionRequest
     {
